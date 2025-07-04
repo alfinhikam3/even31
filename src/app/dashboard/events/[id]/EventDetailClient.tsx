@@ -205,6 +205,13 @@ export default function EventDetailClient({ event: initialEvent, participants: i
                 <span>Generate Sertifikat</span>
               </Link>
               <Link
+                href={`/dashboard/events/${event.id}/generate-certificates-multi`}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition-colors flex items-center space-x-2"
+              >
+                <span>📋</span>
+                <span>Multi-Template Certificates</span>
+              </Link>
+              <Link
                 href={`/dashboard/events/${event.id}/edit`}
                 className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors flex items-center space-x-2"
               >
@@ -470,4 +477,4 @@ export default function EventDetailClient({ event: initialEvent, participants: i
       </div>
     </div>
   )
-} 
+}

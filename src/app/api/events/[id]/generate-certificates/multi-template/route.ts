@@ -47,31 +47,38 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     }
     const templateFile = formData.get('template') as File | null
     const fields = JSON.parse(formData.get('fields') as string)
+    
     // If no file, just update fields
     if (!templateFile) {
       await db.execute('UPDATE certificate_templates_multi SET template_fields = ? WHERE event_id = ? AND template_index = ?', [JSON.stringify(fields), params.id, templateIndex])
       return NextResponse.json({ message: 'Fields updated' })
     }
+    
     // If file, remove old file if exists
     const [oldTemplates] = await db.execute('SELECT template_path FROM certificate_templates_multi WHERE event_id = ? AND template_index = ?', [params.id, templateIndex])
     const templatesArr = oldTemplates as any[]
     if (templatesArr.length > 0 && templatesArr[0].template_path) {
       try { await unlink(path.join(process.cwd(), 'public', templatesArr[0].template_path)) } catch {}
     }
+    
     // Remove old DB row
     await db.execute('DELETE FROM certificate_templates_multi WHERE event_id = ? AND template_index = ?', [params.id, templateIndex])
+    
     // Save new file
     const dir = path.join(process.cwd(), 'public', 'certificates', 'templates')
     try { await access(dir) } catch { await mkdir(dir, { recursive: true }) }
+    
     const filename = `template_${templateIndex}_${Date.now()}`
     const ext = templateFile.name.split('.').pop() || 'png'
     const filepath = path.join(dir, `${filename}.${ext}`)
     const buffer = Buffer.from(await templateFile.arrayBuffer())
     await writeFile(filepath, buffer)
+    
     // Save to DB
     await db.execute('INSERT INTO certificate_templates_multi (event_id, template_index, template_path, template_fields) VALUES (?, ?, ?, ?)', [params.id, templateIndex, `/certificates/templates/${filename}.${ext}`, JSON.stringify(fields)])
+    
     return NextResponse.json({ message: 'Template saved', path: `/certificates/templates/${filename}.${ext}` })
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : 'Unknown error' }, { status: 500 })
   }
-} 
+}
