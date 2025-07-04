@@ -19,75 +19,72 @@ const DEFAULT_FIELDS = [
   { key: 'token', label: 'Token', color: 'bg-pink-500', fontFamily: 'Helvetica', fontSize: 14, bold: false, italic: false },
 ]
 
-const NUM_TEMPLATES = 6;
-
 export default function GenerateCertificatesPage() {
   const params = useParams()
   const router = useRouter()
   const eventId = params.id
-  const [activeTab, setActiveTab] = useState(0)
-  const [templates, setTemplates] = useState<(File | null)[]>(Array(NUM_TEMPLATES).fill(null))
-  const [templateUrls, setTemplateUrls] = useState<(string | null)[]>(Array(NUM_TEMPLATES).fill(null))
-  const [fields, setFields] = useState<any[][]>(Array(NUM_TEMPLATES).fill(null).map(() => DEFAULT_FIELDS.map((f, i) => ({ ...f, x: 40 + i * 140, y: 30, active: true }))))
+  const [template, setTemplate] = useState<File | null>(null)
+  const [templateUrl, setTemplateUrl] = useState<string | null>(null)
+  const [fields, setFields] = useState(DEFAULT_FIELDS.map((f, i) => ({ ...f, x: 40 + i * 140, y: 30, active: true })))
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const [offset, setOffset] = useState({ x: 0, y: 0 })
   const imgRef = useRef<HTMLImageElement>(null)
   const [saving, setSaving] = useState(false)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [generating, setGenerating] = useState(false)
-  const [activeFields, setActiveFields] = useState({
-    name: true,
-    event: true,
-    number: true,
-    date: true,
-    token: true,
-  })
-  const [templateSizes, setTemplateSizes] = useState<({ width: number, height: number } | null)[]>(Array(NUM_TEMPLATES).fill(null))
+  const [templateSize, setTemplateSize] = useState<{ width: number, height: number } | null>(null)
+  const [participants, setParticipants] = useState<any[]>([])
+  const [selectedParticipant, setSelectedParticipant] = useState<string>('')
 
   useEffect(() => {
-    const fetchTemplates = async () => {
-      const res = await fetch(`/api/events/${eventId}/generate-certificates/multi-template`);
-      if (res.ok) {
-        const data = await res.json();
-        const loadedTemplates = Array(NUM_TEMPLATES).fill(null);
-        const loadedUrls = Array(NUM_TEMPLATES).fill(null);
-        const loadedFields = Array(NUM_TEMPLATES).fill(null).map(() => DEFAULT_FIELDS.map((f, i) => ({ ...f, x: 40 + i * 140, y: 30, active: true })));
-        const loadedSizes = Array(NUM_TEMPLATES).fill(null);
-        for (const t of data.templates) {
-          const idx = t.templateIndex - 1;
-          loadedUrls[idx] = t.templateUrl;
-          loadedFields[idx] = t.fields;
-          loadedSizes[idx] = t.templateSize;
+    const fetchData = async () => {
+      try {
+        // Fetch template data
+        const templateRes = await fetch(`/api/events/${eventId}/generate-certificates/template`)
+        if (templateRes.ok) {
+          const templateData = await templateRes.json()
+          setTemplateUrl(templateData.templateUrl)
+          setFields(templateData.fields || DEFAULT_FIELDS.map((f, i) => ({ ...f, x: 40 + i * 140, y: 30, active: true })))
+          setTemplateSize(templateData.templateSize)
         }
-        setTemplateUrls(loadedUrls);
-        setFields(loadedFields);
-        setTemplateSizes(loadedSizes);
+
+        // Fetch participants
+        const participantsRes = await fetch(`/api/events/${eventId}`)
+        if (participantsRes.ok) {
+          const eventData = await participantsRes.json()
+          setParticipants(eventData.participants || [])
+          if (eventData.participants && eventData.participants.length > 0) {
+            setSelectedParticipant(eventData.participants[0].id)
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching data:', error)
       }
-    };
-    fetchTemplates();
-  }, [eventId]);
+    }
+    fetchData()
+  }, [eventId])
 
   // Perhitungan preview canvas: selalu aspect ratio A4 agar posisi field identik dengan PDF
-  const A4_WIDTH = 842, A4_HEIGHT = 595;
-  const PREVIEW_MAX_WIDTH = 420;
-  const PREVIEW_MAX_HEIGHT = 297;
-  let widthPreview = PREVIEW_MAX_WIDTH, heightPreview = PREVIEW_MAX_HEIGHT;
-  if (templateSizes[activeTab]) {
+  const A4_WIDTH = 842, A4_HEIGHT = 595
+  const PREVIEW_MAX_WIDTH = 420
+  const PREVIEW_MAX_HEIGHT = 297
+  let widthPreview = PREVIEW_MAX_WIDTH, heightPreview = PREVIEW_MAX_HEIGHT
+  if (templateSize) {
     // Selalu pakai aspect ratio A4
-    widthPreview = PREVIEW_MAX_WIDTH;
-    heightPreview = PREVIEW_MAX_WIDTH * (A4_HEIGHT / A4_WIDTH);
+    widthPreview = PREVIEW_MAX_WIDTH
+    heightPreview = PREVIEW_MAX_WIDTH * (A4_HEIGHT / A4_WIDTH)
   }
 
-  const handleTabChange = (idx: number) => setActiveTab(idx)
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, idx: number) => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) {
-      setTemplates(t => { const arr = [...t]; arr[idx] = file; return arr; })
+      setTemplate(file)
       const url = URL.createObjectURL(file)
-      setTemplateUrls(u => { const arr = [...u]; arr[idx] = url; return arr; })
+      setTemplateUrl(url)
+      
       const img = new window.Image()
       img.onload = () => {
-        setTemplateSizes(s => { const arr = [...s]; arr[idx] = { width: img.naturalWidth, height: img.naturalHeight }; return arr; })
+        setTemplateSize({ width: img.naturalWidth, height: img.naturalHeight })
       }
       img.src = url
     }
@@ -99,37 +96,31 @@ export default function GenerateCertificatesPage() {
   // Simpan posisi offset saat mulai drag
   const handleFieldPointerDown = (idx: number, clientX: number, clientY: number) => {
     setDragIndex(idx)
-    if (!templateSizes[activeTab]) return
+    if (!templateSize) return
     const preview = previewRef.current
     if (!preview) return
     const rect = preview.getBoundingClientRect()
     setOffset({
-      x: clientX - (fields[activeTab][idx].x / templateSizes[activeTab].width) * widthPreview - rect.left,
-      y: clientY - (fields[activeTab][idx].y / templateSizes[activeTab].height) * heightPreview - rect.top,
+      x: clientX - (fields[idx].x / templateSize.width) * widthPreview - rect.left,
+      y: clientY - (fields[idx].y / templateSize.height) * heightPreview - rect.top,
     })
   }
 
   // Handler drag di parent
   const handlePointerMove = (clientX: number, clientY: number) => {
-    if (dragIndex === null || !templateSizes[activeTab]) return
+    if (dragIndex === null || !templateSize) return
     const preview = previewRef.current
     if (!preview) return
     const rect = preview.getBoundingClientRect()
-    let x = ((clientX - offset.x - rect.left) / widthPreview) * templateSizes[activeTab].width
-    let y = ((clientY - offset.y - rect.top) / heightPreview) * templateSizes[activeTab].height
+    let x = ((clientX - offset.x - rect.left) / widthPreview) * templateSize.width
+    let y = ((clientY - offset.y - rect.top) / heightPreview) * templateSize.height
     // Clamp agar tidak keluar area
-    x = Math.max(0, Math.min(x, templateSizes[activeTab].width - 1))
-    y = Math.max(0, Math.min(y, templateSizes[activeTab].height - 1))
-    setFields(f => {
-      const arr = f.map(fieldsArr => fieldsArr.map((field, i) => i === dragIndex ? { ...field, x, y } : field))
-      return arr;
-    })
+    x = Math.max(0, Math.min(x, templateSize.width - 1))
+    y = Math.max(0, Math.min(y, templateSize.height - 1))
+    setFields(f => f.map((field, i) => i === dragIndex ? { ...field, x, y } : field))
   }
 
   // Handler mouse/touch event di parent
-  const handleMouseDown = (e: React.MouseEvent) => {
-    // Tidak melakukan apapun jika klik di luar field
-  }
   const handleMouseMove = (e: React.MouseEvent) => {
     if (dragIndex !== null) {
       handlePointerMove(e.clientX, e.clientY)
@@ -145,64 +136,70 @@ export default function GenerateCertificatesPage() {
 
   // Toggle field aktif
   const handleToggleField = (key: string, checked: boolean) => {
-    setFields(f => {
-      const arr = f.map(fieldsArr => fieldsArr.map(field => field.key === key ? { ...field, active: checked } : field))
-      return arr;
-    })
+    setFields(f => f.map(field => field.key === key ? { ...field, active: checked } : field))
   }
-
-  // Inisialisasi posisi field agar tidak tumpuk (spread horizontal di atas template)
-  useEffect(() => {
-    setFields(f => f.map(fieldsArr => fieldsArr.map((f, i) => ({
-      ...f,
-      x: 40 + i * 140,
-      y: 30,
-      active: typeof f.active === 'boolean' ? f.active : true
-    }))))
-  }, [])
 
   // Simpan template & posisi ke backend
   const handleSave = async () => {
-    const idx = activeTab
-    if (!templateUrls[idx] || !templateSizes[idx]) return toast.error('Upload template terlebih dahulu!')
+    if (!templateUrl || !templateSize) return toast.error('Upload template terlebih dahulu!')
     setSaving(true)
+    
     const formData = new FormData()
-    if (templates[idx]) formData.append('template', templates[idx] as File)
-    formData.append('fields', JSON.stringify(fields[idx]))
-    formData.append('template_index', String(idx + 1))
-    const res = await fetch(`/api/events/${eventId}/generate-certificates/multi-template`, { method: 'POST', body: formData })
+    if (template) formData.append('template', template)
+    formData.append('fields', JSON.stringify(fields))
+    
+    const res = await fetch(`/api/events/${eventId}/generate-certificates/template`, { method: 'POST', body: formData })
     if (res.ok) toast.success('Template & posisi field berhasil disimpan!')
     else toast.error('Gagal menyimpan template!')
     setSaving(false)
   }
 
   // Preview sertifikat (ambil dari backend)
-  const handlePreview = async (participantId: string) => {
+  const handlePreview = async () => {
+    if (!templateUrl || !templateSize) return toast.error('Upload template terlebih dahulu!')
+    
     setPreviewUrl(null)
-    const idx = activeTab
-    const res = await fetch(`/api/events/${eventId}/generate-certificates/multi-template/preview`, {
+    toast.loading('Generating preview...', { id: 'preview' })
+    
+    const res = await fetch(`/api/events/${eventId}/generate-certificates/preview`, {
       method: 'POST',
-      body: JSON.stringify({ participantId, templateIndex: idx + 1 }),
+      body: JSON.stringify({ 
+        fields, 
+        templateSize,
+        participantId: selectedParticipant || 'SAMPLE_PARTICIPANT_ID'
+      }),
       headers: { 'Content-Type': 'application/json' }
     })
+    
     if (res.ok) {
       const blob = await res.blob()
       setPreviewUrl(URL.createObjectURL(blob))
+      toast.success('Preview generated!', { id: 'preview' })
     } else {
-      toast.error('Gagal generate preview!')
+      const error = await res.json()
+      toast.error(error.error || 'Gagal generate preview!', { id: 'preview' })
     }
   }
 
   // Generate batch sertifikat
-  const handleGenerate = async (participantId: string) => {
+  const handleGenerate = async () => {
+    if (!templateUrl || !templateSize) return toast.error('Upload template terlebih dahulu!')
+    
     setGenerating(true)
-    const res = await fetch(`/api/events/${eventId}/generate-certificates/multi-template/generate`, {
+    toast.loading('Generating certificates...', { id: 'generate' })
+    
+    const res = await fetch(`/api/events/${eventId}/generate-certificates/generate`, {
       method: 'POST',
-      body: JSON.stringify({ participantId }),
       headers: { 'Content-Type': 'application/json' }
     })
-    if (res.ok) toast.success('Sertifikat multi berhasil digenerate!')
-    else toast.error('Gagal generate sertifikat multi!')
+    
+    if (res.ok) {
+      const result = await res.json()
+      toast.success(result.message, { id: 'generate' })
+    } else {
+      const error = await res.json()
+      toast.error(error.error || 'Gagal generate sertifikat!', { id: 'generate' })
+    }
     setGenerating(false)
   }
 
@@ -212,8 +209,8 @@ export default function GenerateCertificatesPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-4">
             <div>
-              <h1 className="text-xl font-bold text-gray-800">Generate Certificates (Multi-Desain)</h1>
-              <p className="text-sm text-gray-500">Design and generate up to 6 certificate designs for event participants.</p>
+              <h1 className="text-xl font-bold text-gray-800">Generate Certificates</h1>
+              <p className="text-sm text-gray-500">Design and generate certificates for event participants.</p>
             </div>
             <button onClick={() => router.back()} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold shadow-sm transition-all transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-blue-400">
               <ArrowLeft className="h-5 w-5" />
@@ -222,24 +219,38 @@ export default function GenerateCertificatesPage() {
           </div>
         </div>
       </header>
+      
       <div className="w-full max-w-7xl mx-auto px-2 sm:px-4 md:px-8 py-4 sm:py-8">
         <Toaster position="top-right" />
-        <div className="mb-4 flex gap-2">
-          {[...Array(NUM_TEMPLATES)].map((_, idx) => (
-            <button
-              key={idx}
-              className={`px-4 py-2 rounded-t-lg border-b-2 font-semibold ${activeTab === idx ? 'border-purple-600 text-purple-700 bg-purple-50' : 'border-gray-200 text-gray-500 bg-gray-100'}`}
-              onClick={() => handleTabChange(idx)}
-            >
-              Desain {idx + 1}
-            </button>
-          ))}
-        </div>
+        
         <div className="bg-white rounded-lg shadow-lg p-4">
-          <p className="mb-2 text-gray-600 text-sm">Upload template sertifikat (PNG/JPG, ukuran A4), lalu atur posisi field secara interaktif untuk desain ke-{activeTab + 1}.</p>
-          <input type="file" accept="image/png,image/jpeg" onChange={e => handleFileChange(e, activeTab)} className="mb-2 w-full max-w-full" />
+          <p className="mb-2 text-gray-600 text-sm">Upload template sertifikat (PNG/JPG, ukuran A4), lalu atur posisi field secara interaktif.</p>
+          
+          <input type="file" accept="image/png,image/jpeg" onChange={handleFileChange} className="mb-2 w-full max-w-full" />
+          
+          {/* Participant Selection */}
+          {participants.length > 0 && (
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Preview dengan data peserta:
+              </label>
+              <select
+                value={selectedParticipant}
+                onChange={(e) => setSelectedParticipant(e.target.value)}
+                className="w-full max-w-md px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="">Sample Data</option>
+                {participants.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} ({p.email})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 mb-4">
-            {fields[activeTab].map((f, idx) => (
+            {fields.map((f, idx) => (
               <div
                 key={f.key}
                 className={`flex flex-col gap-2 p-3 rounded-xl border shadow-sm transition-all bg-white relative group
@@ -259,82 +270,70 @@ export default function GenerateCertificatesPage() {
                   </label>
                 </div>
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                    <select
-                      value={f.fontFamily}
-                      onChange={e => {
-                        setFields(f => {
-                          const arr = f.map(fieldsArr => fieldsArr.map((field, i) => i === idx ? { ...field, fontFamily: e.target.value } : field))
-                          return arr;
-                        })
-                      }}
-                      className="flex-1 rounded-md border px-2 py-1 text-xs focus:ring-1 focus:ring-purple-400"
-                      title="Font Family"
-                    >
-                      {FONT_FAMILIES.map(opt => (
-                        <option key={opt.value} value={opt.value}>{opt.label}</option>
-                      ))}
-                    </select>
+                  <select
+                    value={f.fontFamily}
+                    onChange={e => {
+                      setFields(f => f.map((field, i) => i === idx ? { ...field, fontFamily: e.target.value } : field))
+                    }}
+                    className="flex-1 rounded-md border px-2 py-1 text-xs focus:ring-1 focus:ring-purple-400"
+                    title="Font Family"
+                  >
+                    {FONT_FAMILIES.map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                  <input
+                    type="number"
+                    min={8}
+                    max={72}
+                    value={f.fontSize}
+                    onChange={e => {
+                      setFields(f => f.map((field, i) => i === idx ? { ...field, fontSize: Number(e.target.value) } : field))
+                    }}
+                    className="w-16 rounded-md border px-2 py-1 text-xs focus:ring-1 focus:ring-purple-400"
+                    title="Font Size"
+                  />
+                  <label className="flex items-center gap-1 cursor-pointer pl-2">
                     <input
-                      type="number"
-                      min={8}
-                      max={72}
-                      value={f.fontSize}
+                      type="checkbox"
+                      checked={!!f.bold}
                       onChange={e => {
-                        setFields(f => {
-                          const arr = f.map(fieldsArr => fieldsArr.map((field, i) => i === idx ? { ...field, fontSize: Number(e.target.value) } : field))
-                          return arr;
-                        })
+                        setFields(f => f.map((field, i) => i === idx ? { ...field, bold: e.target.checked } : field))
                       }}
-                      className="w-16 rounded-md border px-2 py-1 text-xs focus:ring-1 focus:ring-purple-400"
-                      title="Font Size"
+                      className="accent-purple-600 w-4 h-4 rounded cursor-pointer"
+                      title="Bold"
                     />
-                    <label className="flex items-center gap-1 cursor-pointer pl-2">
-                      <input
-                        type="checkbox"
-                        checked={!!f.bold}
-                        onChange={e => {
-                          setFields(f => {
-                            const arr = f.map(fieldsArr => fieldsArr.map((field, i) => i === idx ? { ...field, bold: e.target.checked } : field))
-                            return arr;
-                          })
-                        }}
-                        className="accent-purple-600 w-4 h-4 rounded cursor-pointer"
-                        title="Bold"
-                      />
-                      <span className="font-bold text-sm text-gray-700">B</span>
-                    </label>
-                    <label className="flex items-center gap-1 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={!!f.italic}
-                        onChange={e => {
-                          setFields(f => {
-                            const arr = f.map(fieldsArr => fieldsArr.map((field, i) => i === idx ? { ...field, italic: e.target.checked } : field))
-                            return arr;
-                          })
-                        }}
-                        className="accent-purple-600 w-4 h-4 rounded cursor-pointer"
-                        title="Italic"
-                      />
-                      <span className="italic text-sm text-gray-700">I</span>
-                    </label>
+                    <span className="font-bold text-sm text-gray-700">B</span>
+                  </label>
+                  <label className="flex items-center gap-1 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={!!f.italic}
+                      onChange={e => {
+                        setFields(f => f.map((field, i) => i === idx ? { ...field, italic: e.target.checked } : field))
+                      }}
+                      className="accent-purple-600 w-4 h-4 rounded cursor-pointer"
+                      title="Italic"
+                    />
+                    <span className="italic text-sm text-gray-700">I</span>
+                  </label>
                 </div>
               </div>
             ))}
           </div>
-          {templateUrls[activeTab] && templateSizes[activeTab] && (
+          
+          {templateUrl && templateSize && (
             <>
               {/* Warning jika aspect ratio template tidak sama dengan A4 */}
-              {Math.abs((templateSizes[activeTab].width / templateSizes[activeTab].height) - (A4_WIDTH / A4_HEIGHT)) > 0.01 && (
+              {Math.abs((templateSize.width / templateSize.height) - (A4_WIDTH / A4_HEIGHT)) > 0.01 && (
                 <div className="mb-2 p-2 bg-yellow-100 text-yellow-800 rounded text-xs font-semibold">
-                  <b>Warning:</b> Aspect ratio template ({templateSizes[activeTab].width}x{templateSizes[activeTab].height}) tidak sama dengan A4 (842x595). Posisi field di hasil PDF bisa melenceng. Disarankan upload template berukuran 842x595 pixel.
+                  <b>Warning:</b> Aspect ratio template ({templateSize.width}x{templateSize.height}) tidak sama dengan A4 (842x595). Posisi field di hasil PDF bisa melenceng. Disarankan upload template berukuran 842x595 pixel.
                 </div>
               )}
               <div
                 ref={previewRef}
                 className="template-preview relative border rounded-lg overflow-x-auto overflow-y-auto mt-4 shadow-lg bg-white mx-auto w-full"
                 style={{ width: widthPreview, height: heightPreview, maxWidth: '100%', maxHeight: '70vw', minHeight: 180, aspectRatio: '842/595' }}
-                onMouseDown={handleMouseDown}
                 onMouseMove={handleMouseMove}
                 onMouseUp={handleMouseUp}
                 onMouseLeave={handleMouseUp}
@@ -343,20 +342,20 @@ export default function GenerateCertificatesPage() {
               >
                 <img
                   ref={imgRef}
-                  src={templateUrls[activeTab]}
+                  src={templateUrl}
                   alt="Template Preview"
                   className="w-full h-full object-contain select-none"
                   draggable={false}
                   style={{ position: 'absolute', left: 0, top: 0, width: widthPreview, height: heightPreview }}
                 />
-                {fields[activeTab].map((field, idx) => (
+                {fields.map((field, idx) => (
                   field.active && (
                     <div
                       key={field.key}
                       className={`absolute cursor-move px-2 py-1 rounded shadow text-black text-xs font-bold select-none ${field.color} ${dragIndex === idx ? 'z-30' : 'z-10'}`}
                       style={{
-                        left: (field.x / templateSizes[activeTab].width) * widthPreview,
-                        top: (field.y / templateSizes[activeTab].height) * heightPreview,
+                        left: (field.x / templateSize.width) * widthPreview,
+                        top: (field.y / templateSize.height) * heightPreview,
                         opacity: dragIndex === idx ? 0.7 : 1,
                         fontFamily: field.fontFamily,
                         fontSize: field.fontSize * (widthPreview / A4_WIDTH),
@@ -387,14 +386,22 @@ export default function GenerateCertificatesPage() {
               </div>
             </>
           )}
+          
           <div className="flex flex-col sm:flex-row gap-2 sm:gap-4 mt-4 w-full">
-            <button onClick={handleSave} className="px-4 py-2 rounded bg-blue-600 hover:bg-blue-700 text-white font-semibold shadow transition-all w-full sm:w-auto text-sm" disabled={saving}>{saving ? 'Menyimpan...' : 'Simpan Template & Posisi'}</button>
-            <button onClick={() => handlePreview('SAMPLE_PARTICIPANT_ID')} className="px-4 py-2 rounded bg-green-600 hover:bg-green-700 text-white font-semibold shadow transition-all w-full sm:w-auto text-sm">Preview Sertifikat</button>
-            <button onClick={() => handleGenerate('SAMPLE_PARTICIPANT_ID')} className="px-4 py-2 rounded bg-purple-600 hover:bg-purple-700 text-white font-semibold shadow transition-all w-full sm:w-auto text-sm" disabled={generating}>{generating ? 'Menggenerate...' : 'Generate Sertifikat Multi'}</button>
+            <button onClick={handleSave} className="px-4 py-2 rounded bg-blue-600 hover:bg-blue-700 text-white font-semibold shadow transition-all w-full sm:w-auto text-sm" disabled={saving}>
+              {saving ? 'Menyimpan...' : 'Simpan Template & Posisi'}
+            </button>
+            <button onClick={handlePreview} className="px-4 py-2 rounded bg-green-600 hover:bg-green-700 text-white font-semibold shadow transition-all w-full sm:w-auto text-sm">
+              Preview Sertifikat
+            </button>
+            <button onClick={handleGenerate} className="px-4 py-2 rounded bg-purple-600 hover:bg-purple-700 text-white font-semibold shadow transition-all w-full sm:w-auto text-sm" disabled={generating}>
+              {generating ? 'Menggenerate...' : 'Generate Semua Sertifikat'}
+            </button>
           </div>
+          
           {previewUrl && (
             <div className="mt-6">
-              <h3 className="font-bold mb-2 bg-blue-600 text-white px-2 py-1 rounded text-sm">Preview Sertifikat (Desain {activeTab + 1}):</h3>
+              <h3 className="font-bold mb-2 bg-blue-600 text-white px-2 py-1 rounded text-sm">Preview Sertifikat:</h3>
               <iframe src={previewUrl} className="w-full h-[220px] sm:h-[400px] md:h-[600px] border rounded shadow bg-white" />
             </div>
           )}
@@ -402,4 +409,4 @@ export default function GenerateCertificatesPage() {
       </div>
     </div>
   )
-} 
+}

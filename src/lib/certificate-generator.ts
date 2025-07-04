@@ -43,11 +43,19 @@ export async function generateCertificate(participantId: string, forceRegenerate
     throw new Error('Template untuk event ini belum ada. Silakan upload template terlebih dahulu.')
   }
 
+  // Check if template file exists
+  const templatePath = path.join(process.cwd(), 'public', participantData.template_path)
+  try {
+    await fs.access(templatePath)
+  } catch {
+    throw new Error('Template file tidak ditemukan di server. Silakan upload ulang template.')
+  }
+
   const fields = typeof participantData.template_fields === 'string' ? JSON.parse(participantData.template_fields) : participantData.template_fields
   let width_img = 900, height_img = 636
   try {
     const sharp = (await import('sharp')).default
-    const imageBytes = await fs.readFile(path.join(process.cwd(), 'public', participantData.template_path))
+    const imageBytes = await fs.readFile(templatePath)
     const meta = await sharp(imageBytes).metadata()
     width_img = meta.width || 900
     height_img = meta.height || 636
@@ -63,7 +71,7 @@ export async function generateCertificate(participantId: string, forceRegenerate
   const pdfDoc = await PDFDocument.create()
   const page = pdfDoc.addPage([842, 595])
 
-  const templateImageBytes = await fs.readFile(path.join(process.cwd(), 'public', participantData.template_path))
+  const templateImageBytes = await fs.readFile(templatePath)
   let imageEmbed
   if (participantData.template_path.toLowerCase().endsWith('.png')) {
     imageEmbed = await pdfDoc.embedPng(templateImageBytes)
@@ -124,4 +132,4 @@ export async function generateCertificate(participantId: string, forceRegenerate
   await db.execute('INSERT INTO certificates (participant_id, path, sent) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE path=VALUES(path), sent=FALSE', [participantData.id, relativePath, false])
   
   return { success: true, path: relativePath }
-} 
+}
